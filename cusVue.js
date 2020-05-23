@@ -5,7 +5,7 @@
 	let gloabOption;
 
 	const LIFE_HOOKS = ["created", "mounted", "updated", "destroyed"];
-	const NODE_INSTRUCTIONS = ["v-show", "v-cloak"];
+	const NODE_INSTRUCTIONS = ["v-show", "v-cloak", "v-for"];
 
 	function warn(err) {
 		console.error(err);
@@ -26,8 +26,8 @@
 	function isFalse(target) {
 		return target === false;
 	}
-	
-	function isObject(obj){
+
+	function isObject(obj) {
 		return Object.prototype.toString.apply(obj) === "[object Object]";
 	}
 
@@ -111,11 +111,62 @@
 			}
 		}
 	}
-
+	function replaceVnode(oldVnode, newVnode) { // 合并vnode
+		return Object.assign(oldVnode, newVnode);
+	}
+	
+	function vnodeToDomSetValue(vnode) {//给真实dom赋值
+		if (vnode.node.nodeType === Node.TEXT_NODE && vnode.node.nodeValue !== vnode.trueNodeValue) {
+			vnode.node.nodeValue = vnode.trueNodeValue;
+		}
+		// vnode.children && (function() {
+		// 	for (let chVnode of vnode.children) {
+		// 		vnodeToDomSetValue(chVnode);
+		// 	}
+		// })()
+	
+	}
+	function createVnodeToDom(vnode){
+			let parentNode=vnode.node;
+			console.log(parentNode)
+			vnode.children && (function() {
+				for (let chVnode of vnode.children) {
+					nodeOps.appendChild(parentNode,createVnodeToDom(chVnode));
+					vnodeToDomSetValue(chVnode);
+				}
+			})()
+			return parentNode;
+	}
+	
+	
+	function patchVnode(oldVnode, vnode, vm) {
+		if (isUnf(oldVnode) && !isUnf(vnode)) {
+			oldVnode = vnode;
+		}
+		let oldCh = oldVnode.children;
+		let newCh = vnode.children;
+		let parentElm = vnode.node = oldVnode.node;
+		if (!isUnf(oldCh) && !isUnf(newCh)) {
+			updateChildren(parentElm, oldCh, newCh, vm);
+		} else if (!isUnf(newCh)) //新节点子节点存在的，旧节点不存在
+		{
+			nodeOps.appendChild(oldVnode.node, newCh);
+		} else if (!isUnf(oldCh)) //旧节点子节点存在的，新节点不存在
+		{
+			// removeDom()	
+			nodeOps.removeChild(oldVnode.node, 0, oldCh.length - 1);
+		} else {
+			// console.log(oldVnode,vnode)
+			if (isUnf(vnode.type) || isUnf(oldVnode.type)) {
+				nodeOps.replaceNode(vnode.node, oldVnode.node);
+			}
+			oldVnode = vnode;
+			vnodeToDomSetValue(oldVnode);
+		}
+	}
 
 
 	function updateChildren(parentElm, oldCh, newCh, vm) {
-		// console.log(parentElm, oldCh, newCh, vm);
 		let oldStartIndex = 0;
 		let newStartIndex = 0;
 		let oldStartVnode = oldCh[oldStartIndex];
@@ -157,59 +208,61 @@
 					oldStartIndex, oldEndIndex);
 				if (isUnf(idxInOld)) { //没有对应的key的节点
 					// console.log(oldStartVnode,newStartVnode,oldStartIndex,newStartIndex)
-					nodeOps.replaceNode(newStartVnode.node, oldStartVnode.node);
+					nodeOps.replaceNode(createVnodeToDom(newStartVnode), oldStartVnode.node);
 					replaceVnode(oldStartVnode, newStartVnode);
+					// patchVnode(oldStartVnode,oldStartVnode,vm);
 				} else { //有对应的key的节点
-
 				}
-				newStartVnode = newCh[++newStartIndex];//?为什么要新节点后移一位
+				oldStartVnode = oldCh[++oldStartIndex];
+				newStartVnode = newCh[++newStartIndex]; 
 			}
 		}
-		if(oldStartIndex<=oldEndIndex)//旧节点未遍历完，新节点已遍历完
+		// console.log(oldStartIndex,oldEndIndex,newStartIndex,newEndIndex)
+		if (oldStartIndex <= oldEndIndex) //旧节点未遍历完，新节点已遍历完
 		{
-			
-		}else if(newStartIndex<=newEndIndex){//新节点未遍历完,旧节点已遍历完
-			
-		}
+			nodeOps.removeChild(parentElm, oldStartIndex, oldEndIndex);
+		} else if (newStartIndex <= newEndIndex) { //新节点未遍历完,旧节点已遍历完
+			nodeOps.appendChild(parentElm, newCh.slice(newStartIndex));
+		}	
 	}
-	
-	let nodeOptions=(()=>{
-		function createNode(newNode, oldInx, parentElm, ) {
-			let node = document.createElement(type);
-			node.innerHTML = text;
+
+	let nodeOptions = (() => {
+		function createNode(nodeName,nodeValue) {
+			let node = document.createElement(nodeName);
+			nodeValue && (node.nodeValue = nodeValue);
 			return node;
 		}
-		
+
 		function createComment(text) {
 			return document.createComment(text);
 		}
-		
+
 		function nextSibling(node) {
 			return node.nextSibling;
 		}
-		
+
 		function removeNode(node) {
 			let parent = node.parentNode;
 			!isUnf(parent) && parent.removeChild(node);
 		}
-		
+
 		function removeChild(node, startInx, endInx) {
 			let children = node.childNodes;
 			for (; startInx <= endInx; startInx++) {
 				node.removeChild(children[startInx]);
 			}
 		}
-		
+
 		function appendChild(node, newCh) {
-			for (let i = 0, len = newCh.length; i <= len; i++) {
+			for (let i = 0, len = newCh.length; i < len; i++) {
 				node.appendChild(newCh[i].node);
 			}
 		}
-		
+
 		function insertBefore(parentNode, newNode, referenceNode) {
 			parentNode.insertBefore(newNode, referenceNode);
 		}
-		
+
 		function getNodeAttrs(node) {
 			if (!isUnf(node.attributes) && node.attributes.length > 0)
 				return Array.prototype.filter.call(node.attributes, (item) => {
@@ -222,6 +275,7 @@
 				})
 			return null;
 		}
+
 		function replaceNode(newNode, oldNode) {
 			let parentNode = oldNode.parentNode;
 			!isUnf(parentNode) && parentNode.replaceChild(newNode, oldNode);
@@ -238,45 +292,10 @@
 			replaceNode
 		}
 	})()
-	
-	let nodeOps=Object.create(nodeOptions);//暴露操作节点的方法对象
-	
-	function replaceVnode(oldVnode, newVnode) {// 合并vnode
-		return Object.assign(oldVnode, newVnode);
-	}
-	
+
+	let nodeOps = Object.create(nodeOptions); //暴露操作节点的方法对象
 
 
-	function patchVnode(oldVnode, vnode, vm) {
-		if (isUnf(oldVnode) && !isUnf(vnode)) {
-			oldVnode = vnode;
-		}
-		let oldCh = oldVnode.children;
-		let newCh = vnode.children;
-		let parentElm = vnode.node = oldVnode.node;
-		if (!isUnf(oldCh) && !isUnf(newCh)) {
-			updateChildren(parentElm, oldCh, newCh, vm);
-		} else if (!isUnf(newCh)) //新节点子节点存在的，旧节点不存在
-		{
-			console.log("appendChild")
-			nodeOps.appendChild(oldVnode.node, newCh);
-
-		} else if (!isUnf(oldCh)) //旧节点子节点存在的，新节点不存在
-		{
-			// removeDom()	
-			// console.log("removeChild")
-			nodeOps.removeChild(oldVnode.node, 0, oldCh.length - 1);
-		} else {
-			// console.log(oldVnode,vnode)
-			if (isUnf(vnode.type) || isUnf(oldVnode.type)) {
-				nodeOps.replaceNode(vnode.node, oldVnode.node);
-			}
-			oldVnode = vnode;
-			if (oldVnode.node.nodeValue !== vnode.trueNodeValue) {
-				oldVnode.node.nodeValue = oldVnode.trueNodeValue;
-			}
-		}
-	}
 	let isAsync = true;
 
 	function updateDom(vm) {
@@ -369,7 +388,7 @@
 		return vBox;
 	}
 
-	
+
 
 	function domToVDom(dom, vm) {
 		let vBox = {
@@ -383,20 +402,26 @@
 			let domChildren = vBox.node.childNodes;
 			for (node of domChildren) {
 				vBox.children = vBox.children || [];
-				if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.COMMENT_NODE && isUnf(node.replaceTrueNode)) {
+				if (node.nodeType === Node.TEXT_NODE) {
 					node.InitialNodeValue = (node.InitialNodeValue || node.nodeValue);
 					vBox.children.push(createVNode(node, vm));
-				} else {
+				} else if (node.nodeType === Node.COMMENT_NODE && !isUnf(node.replaceTrueNode)) {
+					if (isTrue(getNodeIsVif(node.replaceTrueNode, vm))) {
+						vBox.children.push(domToVDom(node, vm));
+					} else {
+						node.InitialNodeValue = (node.InitialNodeValue || node.nodeValue);
+						vBox.children.push(createVNode(node, vm));
+					}
+				} else if (node.nodeType !== Node.COMMENT_NODE) {
 					vBox.children.push(domToVDom(node, vm));
 				}
 			}
 		}
-		if (dom.nodeType === Node.COMMENT_NODE && dom.replaceTrueNode) {
+		if (dom.nodeType === Node.COMMENT_NODE && !isUnf(dom.replaceTrueNode)) {
 			if (isTrue(getNodeIsVif(dom.replaceTrueNode, vm))) {
 				vBox.node = dom.replaceTrueNode;
 				vBox.type = vBox.node.nodeName;
 				analysisChilNode();
-				// vBox.children.push(domToVDom(vBox.node, vm));
 			}
 		} else if (dom.nodeType !== Node.COMMENT_NODE && isFalse(getNodeIsVif(dom, vm))) {
 			let commentNode = nodeOps.createComment("");
@@ -424,7 +449,8 @@
 		} else if (!document.querySelector(options.el)) {
 			warn(`not found root dom ${options.el}`);
 			return
-		} {
+		} 
+		{
 			this.$rootDom = document.querySelector(options.el);
 			this.$updated = options.updated;
 			this.$el = options.el;
@@ -437,7 +463,7 @@
 	}
 
 	function callHook(fn, context) {
-		fn.apply(context);
+		isFunction(fn) && fn.apply(context);
 	}
 
 	function init(Vue) {
@@ -470,9 +496,8 @@
 		Vue.prototype._initMethods = function() {
 			let vm = this;
 			let _methods = gloabOption.methods; //使用Proxy做拦截
-			if(isObject(_methods))
-			{
-				for(let method in _methods) {
+			if (isObject(_methods)) {
+				for (let method in _methods) {
 					Object.defineProperty(vm, method, { //转移访问this指针至vm实例
 						get: function() {
 							return _methods[method];
@@ -484,7 +509,7 @@
 				}
 			}
 			this.$methods = _methods;
-			
+
 		}
 		Vue.prototype._initTemplate = function() {
 			let vm = this;
@@ -492,6 +517,7 @@
 			this.vNode = domToVDom(this.$rootDom, vm);
 			this._FIRST_RENDER = false;
 			this._IS_INIT_TEMPLATE = true;
+			console.log(this.vNode)
 			patchVnode(null, this.vNode, vm);
 		}
 	}
